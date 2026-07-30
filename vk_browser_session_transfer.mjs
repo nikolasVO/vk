@@ -20,6 +20,30 @@ function hasVkCookie(cookies) {
   );
 }
 
+async function findVisibleButtonByText(page, expectedText) {
+  const buttons = page.locator("button");
+  const index = await buttons.evaluateAll((elements, expected) => {
+    const normalize = (value) =>
+      (value || "")
+        .normalize("NFKC")
+        .replace(/[\p{C}\p{Z}\s]+/gu, "")
+        .toLowerCase();
+    const wanted = normalize(expected);
+    return elements.findIndex((element) => {
+      const style = window.getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return (
+        style.visibility !== "hidden" &&
+        style.display !== "none" &&
+        box.width > 0 &&
+        box.height > 0 &&
+        normalize(element.innerText || element.textContent).includes(wanted)
+      );
+    });
+  }, expectedText);
+  return index >= 0 ? buttons.nth(index) : null;
+}
+
 function readGroupId() {
   if (/^\d+$/.test(process.env.VK_GROUP_ID ?? "")) {
     return process.env.VK_GROUP_ID;
@@ -119,11 +143,8 @@ async function checkSession() {
     if (!hasVkCookie(cookies) || /login|auth/i.test(page.url())) {
       throw new Error("Docker Chromium не авторизован в VK");
     }
-    const createButton = page
-      .locator("button:visible")
-      .filter({ hasText: "Создать" })
-      .last();
-    if (!(await createButton.isVisible())) {
+    const createButton = await findVisibleButtonByText(page, "Создать");
+    if (!createButton) {
       const controls = await page
         .locator('button, [role="button"], a')
         .evaluateAll((elements) =>

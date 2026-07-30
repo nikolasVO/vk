@@ -241,6 +241,30 @@ function cleanupImages(product) {
   }
 }
 
+async function findVisibleButtonByText(page, expectedText) {
+  const buttons = page.locator("button");
+  const index = await buttons.evaluateAll((elements, expected) => {
+    const normalize = (value) =>
+      (value || "")
+        .normalize("NFKC")
+        .replace(/[\p{C}\p{Z}\s]+/gu, "")
+        .toLowerCase();
+    const wanted = normalize(expected);
+    return elements.findIndex((element) => {
+      const style = window.getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return (
+        style.visibility !== "hidden" &&
+        style.display !== "none" &&
+        box.width > 0 &&
+        box.height > 0 &&
+        normalize(element.innerText || element.textContent).includes(wanted)
+      );
+    });
+  }, expectedText);
+  return index >= 0 ? buttons.nth(index) : null;
+}
+
 async function openComposer(page, groupId) {
   await page.goto(`https://vk.ru/club${groupId}`, {
     waitUntil: "domcontentloaded",
@@ -252,11 +276,11 @@ async function openComposer(page, groupId) {
       "Профиль VK не авторизован. Войдите через веб-интерфейс Chromium",
     );
   }
-  await page
-    .locator("button:visible")
-    .filter({ hasText: "Создать" })
-    .last()
-    .click();
+  const createButton = await findVisibleButtonByText(page, "Создать");
+  if (!createButton) {
+    throw new Error("На странице сообщества не найдена кнопка «Создать»");
+  }
+  await createButton.click();
   const postMenuItem = page.getByText("Пост", { exact: true });
   await postMenuItem.waitFor({ state: "visible", timeout: 15000 });
   await postMenuItem.click();
