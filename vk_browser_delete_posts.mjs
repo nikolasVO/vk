@@ -57,7 +57,13 @@ async function findVisibleControl(page, expected) {
   return index >= 0 ? controls.nth(index) : null;
 }
 
-async function deletePost(page, groupId, postId, shouldDelete) {
+async function deletePost(
+  page,
+  groupId,
+  postId,
+  shouldDelete,
+  useNewestPost,
+) {
   await page.goto(`https://vk.ru/club${groupId}`, {
     waitUntil: "domcontentloaded",
     timeout: 60000,
@@ -71,6 +77,22 @@ async function deletePost(page, groupId, postId, shouldDelete) {
       .locator(`a[href*="wall-${groupId}_${postId}"]`)
       .last();
     if ((await postLink.count()) === 0) {
+      if (useNewestPost) {
+        const newestActions = page
+          .locator('[data-testid="post_context_menu_toggle"]')
+          .first();
+        if ((await newestActions.count()) > 0) {
+          await newestActions.scrollIntoViewIfNeeded().catch(() => {});
+          await page.waitForTimeout(500);
+          if (await newestActions.isVisible().catch(() => false)) {
+            actions = newestActions;
+            console.log(
+              `VK скрыл permalink wall-${groupId}_${postId}; используется верхняя запись в ленте.`,
+            );
+            break;
+          }
+        }
+      }
       await page.evaluate(() => window.scrollBy(0, 500));
       await page.waitForTimeout(500);
       continue;
@@ -199,6 +221,7 @@ async function main() {
     options: {
       "post-ids": { type: "string" },
       delete: { type: "boolean", default: false },
+      newest: { type: "boolean", default: false },
     },
   });
   const postIds = (values["post-ids"] || "")
@@ -218,8 +241,17 @@ async function main() {
   if (!context) throw new Error("Docker Chromium не вернул профиль");
   const page = await context.newPage();
   try {
-    for (const postId of postIds) {
-      await deletePost(page, groupId, postId, values.delete);
+    const orderedPostIds = values.newest
+      ? [...postIds].sort((left, right) => Number(right) - Number(left))
+      : postIds;
+    for (const postId of orderedPostIds) {
+      await deletePost(
+        page,
+        groupId,
+        postId,
+        values.delete,
+        values.newest,
+      );
     }
     if (values.delete) markDeleted(groupId, postIds);
   } finally {
