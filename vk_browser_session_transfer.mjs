@@ -121,8 +121,8 @@ async function checkSession() {
     }
     const createButton = page
       .locator("button:visible")
-      .filter({ hasText: /^\s*Создать\s*$/ })
-      .first();
+      .filter({ hasText: "Создать" })
+      .last();
     if (!(await createButton.isVisible())) {
       const controls = await page
         .locator('button, [role="button"], a')

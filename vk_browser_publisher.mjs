@@ -254,8 +254,8 @@ async function openComposer(page, groupId) {
   }
   await page
     .locator("button:visible")
-    .filter({ hasText: /^\s*Создать\s*$/ })
-    .first()
+    .filter({ hasText: "Создать" })
+    .last()
     .click();
   const postMenuItem = page.getByText("Пост", { exact: true });
   await postMenuItem.waitFor({ state: "visible", timeout: 15000 });
