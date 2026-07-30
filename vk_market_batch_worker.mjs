@@ -66,6 +66,24 @@ async function inspectPage(page) {
     return { status: "failed", message: "VK не удалось загрузить файл" };
   }
 
+  const partialMatches = [
+    ...body.matchAll(
+      /Не удалось добавить\s+(\d+)\s+из\s+(\d+)\s+товар/gi,
+    ),
+  ];
+  if (partialMatches.length) {
+    const match = partialMatches.at(-1);
+    const failed = Number(match[1]);
+    const total = Number(match[2]);
+    return {
+      status: "partial",
+      imported: total - failed,
+      failed,
+      total,
+      message: `Добавлено ${total - failed} из ${total}; ошибок: ${failed}`,
+    };
+  }
+
   const progressMatches = [
     ...body.matchAll(/Добавлено\s+(\d+)\s+из\s+(\d+)\s+товар/gi),
   ];
@@ -170,7 +188,7 @@ async function waitForImport({
           console.log(`[VK] ${result.message}`);
           lastMessage = result.message;
         }
-        if (["completed", "failed"].includes(result.status)) {
+        if (["completed", "partial", "failed"].includes(result.status)) {
           const screenshotPath = path.join(
             dataDir,
             `vk_market_batch_${result.status}.png`,
@@ -336,6 +354,22 @@ async function main() {
       if (result.status === "completed") {
         completed = true;
         break;
+      }
+      if (result.status === "partial") {
+        console.error(
+          `VK отклонил ${result.failed} из ${result.total}. ` +
+            "Повторная отправка не дублирует уже добавленные товары.",
+        );
+        if (attempt === retries) {
+          console.error(
+            "Лимит повторов исчерпан; проблемные товары будут найдены " +
+              "при следующем сканировании магазина.",
+          );
+          completed = true;
+          break;
+        }
+        await sleep(30000);
+        continue;
       }
       console.error(`Партия не принята: ${result.message}`);
       if (attempt < retries) await sleep(30000);

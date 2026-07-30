@@ -20,6 +20,7 @@ vk_market_*.yml
 vk_market_*.csv
 vk_market_*.json
 vk_market_*.png
+vk_market_errors_*
 vk_market_template.xlsx
 vk_post_*_delete_failed.png
 vk_post_*_menu.png
