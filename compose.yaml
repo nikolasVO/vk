@@ -1,0 +1,77 @@
+x-publisher-base: &publisher-base
+  image: "${VK_PUBLISHER_IMAGE:-vk-publisher:latest}"
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment:
+    VK_DATA_DIR: "/data"
+    BROWSER_CDP_URL: "http://127.0.0.1:9222"
+  volumes:
+    - "${VK_DATA_PATH:-.}:/data"
+  network_mode: "service:chromium"
+  depends_on:
+    chromium:
+      condition: service_healthy
+
+services:
+  chromium:
+    image: "${VK_CHROMIUM_IMAGE:-lscr.io/linuxserver/chromium:latest}"
+    container_name: vk-chromium
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      TZ: "Europe/Moscow"
+      TITLE: "VK Publisher"
+      CHROME_CLI: >-
+        --remote-debugging-address=0.0.0.0
+        --remote-debugging-port=9222
+        --remote-allow-origins=*
+        --user-data-dir=/config/vk-profile
+        --no-first-run
+        https://vk.ru/club${VK_GROUP_ID:-240572006}
+    volumes:
+      - "${VK_CHROME_CONFIG_PATH:-./.docker-chromium-config}:/config"
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3001"
+    shm_size: "1gb"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS http://127.0.0.1:9222/json/version >/dev/null"
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  publisher:
+    <<: *publisher-base
+    profiles:
+      - tools
+
+  publisher-all:
+    <<: *publisher-base
+    container_name: vk-publisher-run
+    environment:
+      VK_DATA_DIR: "/data"
+      BROWSER_CDP_URL: "http://127.0.0.1:9222"
+      VK_PUBLISH_INTERVAL: "${VK_PUBLISH_INTERVAL:-60}"
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - >-
+        node /app/vk_browser_publisher.mjs
+        --publish --yes --all
+        --interval "$${VK_PUBLISH_INTERVAL}";
+        status=$$?;
+        if [ "$$status" -eq 0 ]; then
+          echo "Все доступные товары обработаны.";
+          exec tail -f /dev/null;
+        fi;
+        sleep 300;
+        exit "$$status"
+    restart: unless-stopped
+    profiles:
+      - all

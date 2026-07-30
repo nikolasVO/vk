@@ -1,0 +1,18 @@
+{
+  "name": "vk-xlsx-browser-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser automation fallback for publishing res.xlsx to VK",
+  "scripts": {
+    "setup": "node vk_browser_setup.mjs",
+    "preview": "node vk_browser_publisher.mjs",
+    "publish:10": "node vk_browser_publisher.mjs --publish --yes --limit 10 --interval 60",
+    "publish:all": "node vk_browser_publisher.mjs --publish --yes --all --interval 60",
+    "status": "python3 vk_browser_status.py",
+    "status:wall": "node vk_browser_wall_status.mjs",
+    "test": "python3 -m unittest -v"
+  },
+  "dependencies": {
+    "playwright-core": "^1.54.1"
+  }
+}
