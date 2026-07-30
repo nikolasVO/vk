@@ -252,7 +252,11 @@ async function openComposer(page, groupId) {
       "Профиль VK не авторизован. Войдите через веб-интерфейс Chromium",
     );
   }
-  await page.getByRole("button", { name: "Создать", exact: true }).click();
+  await page
+    .locator("button:visible")
+    .filter({ hasText: /^\s*Создать\s*$/ })
+    .first()
+    .click();
   const postMenuItem = page.getByText("Пост", { exact: true });
   await postMenuItem.waitFor({ state: "visible", timeout: 15000 });
   await postMenuItem.click();

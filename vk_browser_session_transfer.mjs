@@ -119,10 +119,10 @@ async function checkSession() {
     if (!hasVkCookie(cookies) || /login|auth/i.test(page.url())) {
       throw new Error("Docker Chromium не авторизован в VK");
     }
-    const createButton = page.getByRole("button", {
-      name: "Создать",
-      exact: true,
-    });
+    const createButton = page
+      .locator("button:visible")
+      .filter({ hasText: /^\s*Создать\s*$/ })
+      .first();
     if (!(await createButton.isVisible())) {
       const controls = await page
         .locator('button, [role="button"], a')
