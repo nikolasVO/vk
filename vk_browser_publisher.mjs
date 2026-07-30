@@ -644,9 +644,17 @@ async function main() {
       "start-row": { type: "string", default: "2" },
       "max-photos": { type: "string", default: "10" },
       "stop-on-error": { type: "boolean", default: false },
+      "allow-wall-posts": { type: "boolean", default: false },
     },
   });
 
+  if (values.publish && !values["allow-wall-posts"]) {
+    throw new Error(
+      "Публикация на стену отключена. Для товаров используйте " +
+        "./import_market.sh. Для осознанного запуска старого режима " +
+        "добавьте --allow-wall-posts.",
+    );
+  }
   if (values.all && values.limit !== undefined) {
     throw new Error("Используйте либо --all, либо --limit N");
   }

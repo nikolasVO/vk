@@ -58,7 +58,7 @@ def visible_description(product: Product) -> str:
 
 
 def prepare_items(
-    products: list[Product], limit: int
+    products: list[Product], limit: int, offset: int = 0
 ) -> tuple[list[FeedItem], list[tuple[Product, str]]]:
     items: list[FeedItem] = []
     skipped: list[tuple[Product, str]] = []
@@ -90,9 +90,8 @@ def prepare_items(
                 description=description,
             )
         )
-        if limit and len(items) >= limit:
-            break
-    return items, skipped
+    end = offset + limit if limit else None
+    return items[offset:end], skipped
 
 
 def exclude_existing_products(
@@ -171,9 +170,11 @@ def build_yml(
     shop_name: str,
     company_name: str,
     max_photos: int,
+    catalog_date: str | None = None,
 ) -> ElementTree.ElementTree:
     catalog = ElementTree.Element(
-        "yml_catalog", {"date": datetime.now().strftime("%Y-%m-%d %H:%M")}
+        "yml_catalog",
+        {"date": catalog_date or datetime.now().strftime("%Y-%m-%d %H:%M")},
     )
     shop = ElementTree.SubElement(catalog, "shop")
     ElementTree.SubElement(shop, "name").text = shop_name
@@ -251,6 +252,7 @@ def main() -> int:
     parser.add_argument("--existing", default="vk_market_existing.json")
     parser.add_argument("--start-row", type=int, default=2)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--max-photos", type=int, default=5)
     parser.add_argument("--group-id")
     parser.add_argument("--shop-name", default="Товары")
@@ -259,6 +261,8 @@ def main() -> int:
 
     if args.limit < 0:
         parser.error("--limit должен быть 0 (все товары) или положительным")
+    if args.offset < 0:
+        parser.error("--offset должен быть 0 или положительным")
     if not 1 <= args.max_photos <= 5:
         parser.error("--max-photos должен быть от 1 до 5")
 
@@ -285,7 +289,9 @@ def main() -> int:
     products, existing_skipped = exclude_existing_products(
         products, existing_path
     )
-    items, invalid_skipped = prepare_items(products, args.limit)
+    items, invalid_skipped = prepare_items(
+        products, args.limit, offset=args.offset
+    )
     skipped = existing_skipped + invalid_skipped
     if not items:
         raise SystemExit("Нет товаров, подходящих для импорта VK")
@@ -296,6 +302,11 @@ def main() -> int:
         shop_name=clean_text(args.shop_name),
         company_name=clean_text(args.company_name),
         max_photos=args.max_photos,
+        # Одинаковый Excel должен давать одинаковый YML и SHA-256. Иначе
+        # текущее время позволяло случайно повторно отправить тот же каталог.
+        catalog_date=datetime.fromtimestamp(
+            xlsx_path.stat().st_mtime
+        ).strftime("%Y-%m-%d %H:%M"),
     )
     tree.write(
         output_path,

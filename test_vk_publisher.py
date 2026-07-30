@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vk_market_feed import normalize_price
+from vk_market_feed import normalize_price, prepare_items
 from vk_publisher import (
     Product,
     clean_text,
@@ -72,6 +72,25 @@ class MarketFeedTests(unittest.TestCase):
         self.assertEqual(normalize_price("2 000 ₽"), "2000")
         self.assertEqual(normalize_price("1 234,50"), "1234.5")
         self.assertEqual(normalize_price("нет цены"), "")
+
+    def test_batch_offset_selects_next_ready_products(self):
+        products = [
+            Product(
+                row_number=index + 2,
+                article=str(index),
+                description=f"Описание {index}",
+                title=f"Товар {index}",
+                brand="",
+                size="",
+                image_urls=(f"https://example.test/{index}.jpg",),
+                source_url="",
+                price="100",
+            )
+            for index in range(3)
+        ]
+        items, skipped = prepare_items(products, limit=1, offset=1)
+        self.assertEqual([item.offer_id for item in items], ["1"])
+        self.assertEqual(skipped, [])
 
 
 class StateTests(unittest.TestCase):

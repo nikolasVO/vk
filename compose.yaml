@@ -62,7 +62,7 @@ services:
     command:
       - >-
         node /app/vk_browser_publisher.mjs
-        --publish --yes --all
+        --publish --yes --all --allow-wall-posts
         --interval "$${VK_PUBLISH_INTERVAL}";
         status=$$?;
         if [ "$$status" -eq 0 ]; then
@@ -74,3 +74,26 @@ services:
     restart: unless-stopped
     profiles:
       - wall
+
+  market-import:
+    <<: *publisher-base
+    container_name: vk-market-import-worker
+    entrypoint:
+      - node
+    command:
+      - /app/vk_market_batch_worker.mjs
+      - --batch-size
+      - "${VK_MARKET_BATCH_SIZE:-100}"
+      - --start-offset
+      - "${VK_MARKET_START_OFFSET:-0}"
+      - --total-limit
+      - "${VK_MARKET_TOTAL_LIMIT:-0}"
+      - --poll-seconds
+      - "${VK_MARKET_POLL_SECONDS:-30}"
+      - --retries
+      - "${VK_MARKET_RETRIES:-3}"
+      - --wait-current
+      - "${VK_MARKET_WAIT_CURRENT:-0}"
+    restart: "no"
+    profiles:
+      - market

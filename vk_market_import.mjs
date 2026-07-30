@@ -245,6 +245,7 @@ async function main() {
   const context = browser.contexts()[0];
   if (!context) throw new Error("Docker Chromium не вернул профиль");
   const page = await context.newPage();
+  let keepPageOpen = false;
   try {
     await openImportDialog(page, readGroupId());
     if (values.inspect) {
@@ -275,7 +276,7 @@ async function main() {
         !values.force &&
         state.group_id === groupId &&
         state.sha256 === sha256 &&
-        state.status === "submitted"
+        ["submitted", "uploading_in_browser"].includes(state.status)
       ) {
         throw new Error(
           "Этот файл уже был отправлен в VK. Для осознанного повтора добавьте --force",
@@ -330,7 +331,12 @@ async function main() {
         return;
       }
 
+      const runId = crypto.randomUUID();
+      await page.evaluate((id) => {
+        window.name = `vk-market-import-${id}`;
+      }, runId);
       await submit.click();
+      keepPageOpen = true;
       fs.writeFileSync(
         statePath,
         `${JSON.stringify(
@@ -340,8 +346,9 @@ async function main() {
             file: path.basename(inputPath),
             bytes: fileData.length,
             sha256,
+            run_id: runId,
             submitted_at: new Date().toISOString(),
-            status: "submitted",
+            status: "uploading_in_browser",
           },
           null,
           2,
@@ -358,7 +365,7 @@ async function main() {
         .locator('[role="alert"], [role="status"], [class*="Snackbar"]')
         .allInnerTexts()
         .catch(() => []);
-      console.log(`Импорт отправлен в сообщество ${groupId}.`);
+      console.log(`Импорт запущен в сообществе ${groupId}.`);
       if (notices.length) {
         console.log(
           `Сообщение VK: ${notices.join(" | ").replace(/\s+/g, " ").trim()}`,
@@ -366,10 +373,14 @@ async function main() {
       }
       console.log(`Состояние: ${statePath}`);
       console.log(`Снимок: ${resultScreenshot}`);
+      console.log(
+        "Вкладка оставлена открытой в Docker Chromium. " +
+          "Не останавливайте контейнер chromium до уведомления VK.",
+      );
       return;
     }
   } finally {
-    await page.close().catch(() => {});
+    if (!keepPageOpen) await page.close().catch(() => {});
     await browser.close().catch(() => {});
   }
 }
