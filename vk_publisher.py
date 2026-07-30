@@ -136,6 +136,7 @@ class Product:
     size: str
     image_urls: tuple[str, ...]
     source_url: str
+    price: str = ""
 
     @property
     def record_id(self) -> str:
@@ -179,6 +180,8 @@ class Product:
             result.append("нет размера")
         if not self.image_urls:
             result.append("нет фото")
+        if not self.price:
+            result.append("нет цены")
         if len(self.image_urls) > MAX_VK_PHOTOS:
             result.append(f"фото больше {MAX_VK_PHOTOS}")
         return tuple(result)
@@ -334,6 +337,7 @@ def row_to_product(row_number: int, row: dict[str, str]) -> Product:
         size=_size_value(row),
         image_urls=extract_image_urls(row.get("Картинки", "")),
         source_url=clean_text(row.get("Ссылка", "")),
+        price=clean_text(row.get("Цена", "")),
     )
 
 

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vk_market_feed import normalize_price
 from vk_publisher import (
     Product,
     clean_text,
@@ -62,7 +63,15 @@ class WorkbookTests(unittest.TestCase):
         self.assertEqual(products[0].row_number, 2)
         self.assertEqual(products[0].article, "730508811")
         self.assertEqual(products[0].brand, "WARTECH")
+        self.assertEqual(products[0].price, "7037")
         self.assertEqual(len(products[0].image_urls), 3)
+
+
+class MarketFeedTests(unittest.TestCase):
+    def test_price_is_normalized_for_vk_yml(self):
+        self.assertEqual(normalize_price("2 000 ₽"), "2000")
+        self.assertEqual(normalize_price("1 234,50"), "1234.5")
+        self.assertEqual(normalize_price("нет цены"), "")
 
 
 class StateTests(unittest.TestCase):

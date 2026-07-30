@@ -36,6 +36,7 @@ def main() -> int:
                 "record_id": product.record_id,
                 "row_number": product.row_number,
                 "article": product.article,
+                "price": product.price,
                 "message": product.message,
                 "image_urls": list(product.image_urls[: args.max_photos]),
             }

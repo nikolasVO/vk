@@ -1,181 +1,147 @@
-# Docker-публикация `res.xlsx` в VK
+# Импорт товаров из `res.xlsx` в магазин VK
 
-Вся рабочая система запускается через Docker Compose:
+Основной сценарий проекта — массовое добавление строк Excel именно как
+карточек товаров VK, а не как записей на стене.
 
-- `chromium` — постоянный Chromium с веб-интерфейсом и сохранённой VK-сессией;
-- `publisher` — одноразовая публикация заданного количества товаров;
-- `publisher-all` — фоновая обработка всего остатка с перезапуском после
-  перезагрузки Docker или сервера.
+Для каждого товара передаются:
 
-Код, Node.js и Python находятся в образе `publisher`. На хосте остаются только
-данные и состояние:
+- название;
+- цена в рублях;
+- описание;
+- до пяти фотографий по ссылкам из столбца `Картинки`;
+- бренд и размер, если они заполнены.
 
-- `.env`;
-- `res.xlsx`;
-- `browser_publish_state.json`;
-- `.docker-chromium-config/` — профиль и авторизация Chromium;
-- `vk-browser-logs/`.
+Вся рабочая логика запускается в Docker. Авторизация VK хранится в постоянном
+профиле Chromium, а сам файл после отправки обрабатывается внутри VK — держать
+контейнер запущенным до окончания импорта не нужно.
 
-## Подготовка
+## Файлы и состояние
+
+- `res.xlsx` — исходный каталог;
+- `.env` — настройки сообщества;
+- `.docker-chromium-config/` — сохранённый вход в VK;
+- `vk_market_existing.json` — снимок уже существующих карточек;
+- `vk_market_products.yml` — подготовленный импорт;
+- `vk_market_validation.csv` — отчёт по строкам;
+- `vk_market_import_state.json` — защита от повторной отправки одного файла.
+
+Сгенерированные файлы и секреты исключены из Git.
+
+## Настройки `.env`
+
+Минимально нужны:
+
+```dotenv
+VK_GROUP_ID=230722098
+VK_CHROMIUM_HTTPS_PORT=3002
+```
+
+`VK_GROUP_ID` — числовой ID сообщества без `club` и без минуса. Пользовательский
+access token для импорта через интерфейс VK не нужен: используется сохранённая
+сессия администратора в Chromium.
+
+## Первый запуск и вход в VK
 
 ```bash
-cd /path/to/vk
 docker compose build publisher
 docker compose up -d chromium
 ```
 
-Веб-интерфейс Chromium доступен только локально:
+Откройте `https://localhost:3002` (или порт из
+`VK_CHROMIUM_HTTPS_PORT`), разрешите переход с самоподписанным сертификатом и
+войдите в VK под администратором сообщества. Вход сохранится после перезапуска.
 
-```text
-https://localhost:3001
-```
-
-Если порт занят, укажите другой в `.env`, например
-`VK_CHROMIUM_HTTPS_PORT=3002`, и откройте соответствующий адрес.
-
-Браузер использует самоподписанный сертификат — при первом открытии нужно
-разрешить переход. Войдите в VK под администратором сообщества. Сессия
-сохранится в `.docker-chromium-config/`.
-
-На удалённом сервере порт не нужно открывать в интернет. Используйте SSH-туннель:
+На сервере не открывайте порт Chromium в интернет. Создайте SSH-туннель:
 
 ```bash
-ssh -L 3001:127.0.0.1:3001 user@server
+ssh -L 3002:127.0.0.1:3002 user@server
 ```
 
-После этого откройте на своём компьютере `https://localhost:3001`.
+Затем откройте на своём компьютере `https://localhost:3002`.
 
-## Публикация
+## Массовый импорт товаров
 
-Следующие 100 товаров:
-
-```bash
-docker compose run --rm publisher \
-  --publish --yes --limit 100 --interval 60
-```
-
-Произвольное количество:
-
-```bash
-docker compose run --rm publisher \
-  --publish --yes --limit 25 --interval 90
-```
-
-Все оставшиеся товары в фоне:
-
-```bash
-docker compose --profile all up -d --build publisher-all
-```
-
-Просмотр фоновых логов:
-
-```bash
-docker compose logs -f publisher-all
-```
-
-Остановка:
-
-```bash
-docker compose stop publisher-all
-```
-
-Повторный запуск безопасен: загрузчик читает `browser_publish_state.json` и
-продолжает с первой ещё не опубликованной строки.
-
-## Статус
-
-Проверка авторизации и прав администратора без создания поста:
+Сначала получите список существующих карточек. Это защищает от дубликатов:
 
 ```bash
 docker compose run --rm --entrypoint node publisher \
-  /app/vk_browser_session_transfer.mjs --check
+  /app/vk_market_existing.mjs
 ```
 
-Сводка по строкам и журналу:
+Создайте YML:
 
 ```bash
 docker compose run --rm --entrypoint python3 publisher \
-  /app/vk_browser_status.py
+  /app/vk_market_feed.py
 ```
 
-Состояние контейнеров:
+Проверка, что VK принимает файл, без запуска импорта:
 
 ```bash
-docker compose ps
+docker compose run --rm --entrypoint node publisher \
+  /app/vk_market_import.mjs \
+  --upload --file vk_market_products.yml
 ```
 
-## Перенос на сервер
-
-Перед копированием сохранённого профиля остановите Chromium, чтобы файлы
-профиля не менялись во время переноса:
+Отправка файла в VK:
 
 ```bash
-docker compose stop chromium
+docker compose run --rm --entrypoint node publisher \
+  /app/vk_market_import.mjs \
+  --upload --file vk_market_products.yml --yes
 ```
 
-Скопируйте папку проекта вместе с:
+После сообщения `Импорт отправлен` контейнер можно закрыть: VK продолжит
+обработку файла самостоятельно. Тот же файл нельзя случайно отправить повторно.
+Для намеренного повторного импорта существует флаг `--force`.
 
-```text
-Dockerfile
-compose.yaml
-.dockerignore
-.env
-res.xlsx
-browser_publish_state.json
-.docker-chromium-config/
-*.py
-*.mjs
-package.json
-package-lock.json
-```
-
-Затем на сервере:
+Ограничить число новых товаров, например первыми 100:
 
 ```bash
-docker compose build publisher
-docker compose up -d chromium
-docker compose --profile all up -d publisher-all
+docker compose run --rm --entrypoint python3 publisher \
+  /app/vk_market_feed.py --limit 100
 ```
 
-Если профиль `.docker-chromium-config/` не переносился или VK запросил новый
-вход, подключитесь через SSH-туннель и войдите заново.
+После этого отправьте созданный YML обычной командой импорта.
 
-Для хранения данных в отдельном каталоге можно задать:
+## Проверки и ограничения
+
+- строки без названия, цены или фото не попадают в YML;
+- при пустом описании используется название;
+- HTML в описании преобразуется в обычный текст;
+- фотографии берутся по прямым ссылкам из Excel;
+- в YML добавляется до пяти фото на карточку;
+- бренд и размер передаются как свойства и дублируются в описании;
+- уже существующие товары исключаются по названию и цене;
+- итоговый YML проверяется на лимит 8 МБ;
+- все решения по строкам записываются в `vk_market_validation.csv`.
+
+## Старый режим публикации на стену
+
+Старая логика сохранена, но вынесена в отдельный профиль `wall` и по умолчанию
+не запускается:
 
 ```bash
-export VK_DATA_PATH=/srv/vk-publisher/data
-export VK_CHROME_CONFIG_PATH=/srv/vk-publisher/chromium
-docker compose --profile all up -d publisher-all
+docker compose --profile wall up -d publisher-all
 ```
 
-В `VK_DATA_PATH` должны находиться `.env`, `res.xlsx` и
-`browser_publish_state.json`.
+Остановить её:
 
-## Формат поста
-
-```text
-Описание:
-...
-
-Название: ...
-
-Бренд: ...          ← если заполнен в Excel
-
-Размер: ...         ← если заполнен в Excel
+```bash
+docker compose --profile wall stop publisher-all
 ```
 
-В пост добавляется до 10 фотографий. Строки без фотографий пропускаются.
-HTML-разметка описания преобразуется в обычный текст.
+Этот режим не нужен для импорта товаров и оставлен только для совместимости.
 
-## Надёжность
+## Проверка проекта
 
-- Прогресс сохраняется после каждого товара.
-- Перед повтором неоднозначная операция сверяется со стеной.
-- Одновременный запуск двух загрузчиков блокируется.
-- Повторяющиеся строки Excel считаются разными записями.
-- Временные фотографии удаляются после обработки.
-- Ошибка отдельного товара записывается в журнал; обработка продолжается.
-- `publisher-all` возобновляет работу после перезапуска сервера.
+```bash
+python3 -m unittest -v
+node --check vk_market_existing.mjs
+node --check vk_market_import.mjs
+node --check vk_market_verify.mjs
+docker compose config --quiet
+```
 
-Не публикуйте `.env`, `.docker-chromium-config/` и
-`browser_publish_state.json` в открытом репозитории.
+Не публикуйте `.env`, `.docker-chromium-config/`, файлы состояния и отчёты в
+открытом репозитории.
