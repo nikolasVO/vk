@@ -44,6 +44,20 @@ async function findVisibleButtonByText(page, expectedText) {
   return index >= 0 ? buttons.nth(index) : null;
 }
 
+async function waitForVisibleButtonByText(
+  page,
+  expectedText,
+  timeoutMs = 30000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const button = await findVisibleButtonByText(page, expectedText);
+    if (button) return button;
+    await page.waitForTimeout(1000);
+  } while (Date.now() < deadline);
+  return null;
+}
+
 function readGroupId() {
   if (/^\d+$/.test(process.env.VK_GROUP_ID ?? "")) {
     return process.env.VK_GROUP_ID;
@@ -143,7 +157,11 @@ async function checkSession() {
     if (!hasVkCookie(cookies) || /login|auth/i.test(page.url())) {
       throw new Error("Docker Chromium не авторизован в VK");
     }
-    const createButton = await findVisibleButtonByText(page, "Создать");
+    const createButton = await waitForVisibleButtonByText(
+      page,
+      "Создать",
+      30000,
+    );
     if (!createButton) {
       const controls = await page
         .locator('button, [role="button"], a')

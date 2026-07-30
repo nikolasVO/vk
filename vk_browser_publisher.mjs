@@ -265,6 +265,20 @@ async function findVisibleButtonByText(page, expectedText) {
   return index >= 0 ? buttons.nth(index) : null;
 }
 
+async function waitForVisibleButtonByText(
+  page,
+  expectedText,
+  timeoutMs = 30000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const button = await findVisibleButtonByText(page, expectedText);
+    if (button) return button;
+    await page.waitForTimeout(1000);
+  } while (Date.now() < deadline);
+  return null;
+}
+
 async function openComposer(page, groupId) {
   await page.goto(`https://vk.ru/club${groupId}`, {
     waitUntil: "domcontentloaded",
@@ -276,7 +290,11 @@ async function openComposer(page, groupId) {
       "Профиль VK не авторизован. Войдите через веб-интерфейс Chromium",
     );
   }
-  const createButton = await findVisibleButtonByText(page, "Создать");
+  const createButton = await waitForVisibleButtonByText(
+    page,
+    "Создать",
+    30000,
+  );
   if (!createButton) {
     throw new Error("На странице сообщества не найдена кнопка «Создать»");
   }
