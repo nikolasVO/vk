@@ -32,7 +32,6 @@ services:
     volumes:
       - "${VK_CHROME_CONFIG_PATH:-./.docker-chromium-config}:/config"
     ports:
-      - "127.0.0.1:3000:3000"
       - "127.0.0.1:3001:3001"
     shm_size: "1gb"
     restart: unless-stopped
