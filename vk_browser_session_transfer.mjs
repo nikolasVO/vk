@@ -124,6 +124,38 @@ async function checkSession() {
       exact: true,
     });
     if (!(await createButton.isVisible())) {
+      const controls = await page
+        .locator('button, [role="button"], a')
+        .evaluateAll((elements) =>
+          elements
+            .filter((element) => {
+              const style = window.getComputedStyle(element);
+              const box = element.getBoundingClientRect();
+              return (
+                style.visibility !== "hidden" &&
+                style.display !== "none" &&
+                box.width > 0 &&
+                box.height > 0
+              );
+            })
+            .slice(0, 120)
+            .map((element) => ({
+              tag: element.tagName.toLowerCase(),
+              text: (element.innerText || element.textContent || "")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, 160),
+              ariaLabel: element.getAttribute("aria-label"),
+              title: element.getAttribute("title"),
+              href: element.getAttribute("href"),
+            })),
+        );
+      const screenshotPath = path.join(dataDir, "vk_admin_check.png");
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+      console.error(
+        `Доступные элементы управления:\n${JSON.stringify(controls, null, 2)}`,
+      );
+      console.error(`Снимок проверки: ${screenshotPath}`);
       throw new Error(
         `В группе ${groupId} не найдена кнопка «Создать»: проверьте права администратора`,
       );
