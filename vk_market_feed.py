@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 from vk_publisher import Product, clean_text, load_dotenv, load_products
@@ -26,6 +27,19 @@ class FeedItem:
     offer_id: str
     price: str
     description: str
+
+
+def vk_picture_url(value: str) -> str:
+    """Возвращает URL, по которому VK получает поддерживаемый формат."""
+    parts = urlsplit(value)
+    path = parts.path
+    if parts.hostname and parts.hostname.endswith("ozone.ru"):
+        # Ozon отдаёт WebP по URL с /wc1000/, даже если расширение .jpg.
+        # Без сегмента ресайза тот же публичный URL возвращает настоящий JPEG.
+        path = path.replace("/wc1000/", "/")
+    return urlunsplit(
+        (parts.scheme, parts.netloc, path, parts.query, parts.fragment)
+    )
 
 
 def normalize_price(value: str) -> str:
@@ -196,7 +210,9 @@ def build_yml(
         ElementTree.SubElement(offer, "currencyId").text = "RUB"
         ElementTree.SubElement(offer, "description").text = item.description
         for image_url in product.image_urls[:max_photos]:
-            ElementTree.SubElement(offer, "picture").text = image_url
+            ElementTree.SubElement(offer, "picture").text = vk_picture_url(
+                image_url
+            )
         if product.brand:
             ElementTree.SubElement(
                 offer, "param", {"name": "Бренд"}

@@ -28,6 +28,6 @@ docker compose run --rm --entrypoint node publisher \
 VK_MARKET_TOTAL_LIMIT="${limit:-0}" \
   docker compose --profile market up -d --force-recreate market-import
 
-echo "Пакетный импорт запущен в фоне партиями по 100 товаров."
+echo "Пакетный импорт запущен в фоне партиями по 50 товаров."
 echo "Не выполняйте 'docker compose stop chromium' до уведомления VK."
 echo "Прогресс: docker compose --profile market logs -f market-import"

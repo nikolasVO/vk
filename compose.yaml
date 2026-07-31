@@ -83,7 +83,7 @@ services:
     command:
       - /app/vk_market_batch_worker.mjs
       - --batch-size
-      - "${VK_MARKET_BATCH_SIZE:-100}"
+      - "${VK_MARKET_BATCH_SIZE:-50}"
       - --start-offset
       - "${VK_MARKET_START_OFFSET:-0}"
       - --total-limit

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vk_market_feed import normalize_price, prepare_items
+from vk_market_feed import normalize_price, prepare_items, vk_picture_url
 from vk_publisher import (
     Product,
     clean_text,
@@ -91,6 +91,15 @@ class MarketFeedTests(unittest.TestCase):
         items, skipped = prepare_items(products, limit=1, offset=1)
         self.assertEqual([item.offer_id for item in items], ["1"])
         self.assertEqual(skipped, [])
+
+    def test_ozon_webp_resize_is_replaced_with_original_jpeg(self):
+        source = (
+            "https://ir.ozone.ru/s3/multimedia-l/wc1000/6020247177.jpg"
+        )
+        self.assertEqual(
+            vk_picture_url(source),
+            "https://ir.ozone.ru/s3/multimedia-l/6020247177.jpg",
+        )
 
 
 class StateTests(unittest.TestCase):

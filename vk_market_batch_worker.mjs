@@ -62,28 +62,6 @@ async function inspectPage(page) {
     .replace(/\u00a0/g, " ")
     .replace(/[ \t]+/g, " ");
 
-  if (/Не удалось загрузить файл/i.test(body)) {
-    return { status: "failed", message: "VK не удалось загрузить файл" };
-  }
-
-  const partialMatches = [
-    ...body.matchAll(
-      /Не удалось добавить\s+(\d+)\s+из\s+(\d+)\s+товар/gi,
-    ),
-  ];
-  if (partialMatches.length) {
-    const match = partialMatches.at(-1);
-    const failed = Number(match[1]);
-    const total = Number(match[2]);
-    return {
-      status: "partial",
-      imported: total - failed,
-      failed,
-      total,
-      message: `Добавлено ${total - failed} из ${total}; ошибок: ${failed}`,
-    };
-  }
-
   const progressMatches = [
     ...body.matchAll(/Добавлено\s+(\d+)\s+из\s+(\d+)\s+товар/gi),
   ];
@@ -117,6 +95,37 @@ async function inspectPage(page) {
     /(Загруженный файл|Загружается)/i.test(body)
   ) {
     return { status: "running", message: "Файл загружается" };
+  }
+
+  if (/В файле нет товаров/i.test(body)) {
+    return {
+      status: "completed",
+      imported: 0,
+      total: 0,
+      message: "В файле нет новых товаров; существующие ID пропущены",
+    };
+  }
+
+  if (/Не удалось загрузить файл/i.test(body)) {
+    return { status: "failed", message: "VK не удалось загрузить файл" };
+  }
+
+  const partialMatches = [
+    ...body.matchAll(
+      /Не удалось добавить\s+(\d+)\s+из\s+(\d+)\s+товар/gi,
+    ),
+  ];
+  if (partialMatches.length) {
+    const match = partialMatches.at(-1);
+    const failed = Number(match[1]);
+    const total = Number(match[2]);
+    return {
+      status: "partial",
+      imported: total - failed,
+      failed,
+      total,
+      message: `Добавлено ${total - failed} из ${total}; ошибок: ${failed}`,
+    };
   }
 
   const completedMatches = [
@@ -161,6 +170,7 @@ async function findImportPage(context, runId, allowAnyRunning) {
 async function waitForImport({
   runId,
   allowAnyRunning = false,
+  expectedTotal = 0,
   pollSeconds,
   timeoutHours,
 }) {
@@ -168,6 +178,7 @@ async function waitForImport({
   const context = browser.contexts()[0];
   if (!context) throw new Error("Docker Chromium не вернул профиль");
   const deadline = Date.now() + timeoutHours * 60 * 60 * 1000;
+  const terminalGraceDeadline = Date.now() + 45_000;
   let lastMessage = "";
   let missingChecks = 0;
   try {
@@ -184,6 +195,28 @@ async function waitForImport({
       } else {
         missingChecks = 0;
         const result = await inspectPage(page);
+        const terminal = ["completed", "partial", "failed"].includes(
+          result.status,
+        );
+        const staleTotal =
+          expectedTotal > 0 &&
+          Number.isInteger(result.total) &&
+          result.total > expectedTotal;
+        if (
+          terminal &&
+          (Date.now() < terminalGraceDeadline || staleTotal)
+        ) {
+          const waitingMessage = staleTotal
+            ? `Игнорируется старый результат ${result.total}; ` +
+              `текущая партия: ${expectedTotal}`
+            : "Ожидается результат текущей партии";
+          if (waitingMessage !== lastMessage) {
+            console.log(`[VK] ${waitingMessage}`);
+            lastMessage = waitingMessage;
+          }
+          await sleep(pollSeconds * 1000);
+          continue;
+        }
         if (result.message !== lastMessage) {
           console.log(`[VK] ${result.message}`);
           lastMessage = result.message;
@@ -358,6 +391,7 @@ async function main() {
       const state = readState();
       const result = await waitForImport({
         runId: state.run_id,
+        expectedTotal: currentSize,
         pollSeconds,
         timeoutHours,
       });
