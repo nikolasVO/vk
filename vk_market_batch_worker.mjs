@@ -329,8 +329,12 @@ async function main() {
     ]);
 
     let completed = false;
-    for (let attempt = 1; attempt <= retries; attempt += 1) {
-      console.log(`Отправка в VK, попытка ${attempt}/${retries}...`);
+    let attempt = 0;
+    let partialAttempts = 0;
+    let failureStreak = 0;
+    while (!completed) {
+      attempt += 1;
+      console.log(`Отправка в VK, попытка ${attempt}...`);
       const importArgs = [
         "/app/vk_market_import.mjs",
         "--upload",
@@ -339,7 +343,18 @@ async function main() {
         "--yes",
       ];
       if (attempt > 1) importArgs.push("--force");
-      run("node", importArgs);
+      try {
+        run("node", importArgs);
+      } catch (error) {
+        failureStreak += 1;
+        const delay = Math.min(30 * 2 ** (failureStreak - 1), 300);
+        console.error(
+          `Не удалось открыть импорт: ${error.message}. ` +
+            `Новая попытка через ${delay} сек.`,
+        );
+        await sleep(delay * 1000);
+        continue;
+      }
       const state = readState();
       const result = await waitForImport({
         runId: state.run_id,
@@ -356,11 +371,13 @@ async function main() {
         break;
       }
       if (result.status === "partial") {
+        failureStreak = 0;
+        partialAttempts += 1;
         console.error(
           `VK отклонил ${result.failed} из ${result.total}. ` +
             "Повторная отправка не дублирует уже добавленные товары.",
         );
-        if (attempt === retries) {
+        if (partialAttempts >= retries) {
           console.error(
             "Лимит повторов исчерпан; проблемные товары будут найдены " +
               "при следующем сканировании магазина.",
@@ -372,10 +389,12 @@ async function main() {
         continue;
       }
       console.error(`Партия не принята: ${result.message}`);
-      if (attempt < retries) await sleep(30000);
-    }
-    if (!completed) {
-      throw new Error(`Партия со смещением ${offset} не импортирована`);
+      failureStreak += 1;
+      const delay = Math.min(30 * 2 ** (failureStreak - 1), 300);
+      console.error(
+        `Временная ошибка VK. Повтор этой же партии через ${delay} сек.`,
+      );
+      await sleep(delay * 1000);
     }
   }
   console.log(`Готово: все ${total - startOffset} товаров отправлены партиями.`);
