@@ -91,9 +91,9 @@ services:
       - --poll-seconds
       - "${VK_MARKET_POLL_SECONDS:-30}"
       - --stall-minutes
-      - "${VK_MARKET_STALL_MINUTES:-20}"
+      - "${VK_MARKET_STALL_MINUTES:-10}"
       - --retries
-      - "${VK_MARKET_RETRIES:-3}"
+      - "${VK_MARKET_RETRIES:-1}"
       - --wait-current
       - "${VK_MARKET_WAIT_CURRENT:-0}"
       - --only-ids
