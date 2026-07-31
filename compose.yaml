@@ -90,10 +90,18 @@ services:
       - "${VK_MARKET_TOTAL_LIMIT:-0}"
       - --poll-seconds
       - "${VK_MARKET_POLL_SECONDS:-30}"
+      - --stall-minutes
+      - "${VK_MARKET_STALL_MINUTES:-20}"
       - --retries
       - "${VK_MARKET_RETRIES:-3}"
       - --wait-current
       - "${VK_MARKET_WAIT_CURRENT:-0}"
+      - --only-ids
+      - "${VK_MARKET_ONLY_IDS_FILE:-}"
+      - --include-existing
+      - "${VK_MARKET_INCLUDE_EXISTING:-0}"
+      - --file-prefix
+      - "${VK_MARKET_FILE_PREFIX:-vk_market}"
     restart: "no"
     profiles:
       - market

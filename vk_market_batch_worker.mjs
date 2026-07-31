@@ -203,6 +203,7 @@ async function waitForImport({
   expectedTotal = 0,
   pollSeconds,
   timeoutHours,
+  stallMinutes,
 }) {
   const browser = await chromium.connectOverCDP(cdpUrl, { timeout: 60000 });
   const context = browser.contexts()[0];
@@ -211,6 +212,8 @@ async function waitForImport({
   const terminalGraceDeadline = Date.now() + 45_000;
   let lastMessage = "";
   let missingChecks = 0;
+  let lastProgressAt = Date.now();
+  let lastProgressKey = "";
   try {
     while (Date.now() < deadline) {
       const page = await findImportPage(context, runId, allowAnyRunning);
@@ -247,6 +250,35 @@ async function waitForImport({
           await sleep(pollSeconds * 1000);
           continue;
         }
+        const progressKey = [
+          result.status,
+          result.imported ?? "",
+          result.total ?? "",
+          result.message,
+        ].join(":");
+        if (result.status === "running" && progressKey !== lastProgressKey) {
+          lastProgressKey = progressKey;
+          lastProgressAt = Date.now();
+        }
+        if (
+          !terminal &&
+          Date.now() - lastProgressAt >= stallMinutes * 60 * 1000
+        ) {
+          const screenshotPath = path.join(
+            dataDir,
+            "vk_market_batch_stalled.png",
+          );
+          await page
+            .screenshot({ path: screenshotPath, fullPage: false })
+            .catch(() => {});
+          await page.close().catch(() => {});
+          return {
+            status: "failed",
+            message:
+              `Нет прогресса импорта ${stallMinutes} мин.; ` +
+              "зависшая партия пропущена",
+          };
+        }
         if (result.message !== lastMessage) {
           console.log(`[VK] ${result.message}`);
           lastMessage = result.message;
@@ -277,6 +309,7 @@ async function waitForImport({
 async function waitForAllCurrentImports({
   pollSeconds,
   timeoutHours,
+  stallMinutes,
 }) {
   while (true) {
     const browser = await chromium.connectOverCDP(cdpUrl, { timeout: 60000 });
@@ -299,6 +332,7 @@ async function waitForAllCurrentImports({
       allowAnyRunning: true,
       pollSeconds,
       timeoutHours,
+      stallMinutes,
     });
     if (current.status !== "completed") {
       throw new Error(`Текущая партия не завершена: ${current.message}`);
@@ -314,8 +348,12 @@ async function main() {
       "total-limit": { type: "string", default: "0" },
       "poll-seconds": { type: "string", default: "30" },
       "timeout-hours": { type: "string", default: "12" },
+      "stall-minutes": { type: "string", default: "20" },
       retries: { type: "string", default: "3" },
       "wait-current": { type: "string", default: "0" },
+      "only-ids": { type: "string", default: "" },
+      "include-existing": { type: "string", default: "0" },
+      "file-prefix": { type: "string", default: "vk_market" },
     },
   });
   const batchSize = positiveInteger(values["batch-size"], "--batch-size");
@@ -337,7 +375,27 @@ async function main() {
     values["timeout-hours"],
     "--timeout-hours",
   );
+  const stallMinutes = positiveInteger(
+    values["stall-minutes"],
+    "--stall-minutes",
+  );
   const retries = positiveInteger(values.retries, "--retries");
+  const onlyIds = values["only-ids"].trim();
+  const filePrefix = values["file-prefix"].trim();
+
+  if (!/^[A-Za-z0-9_.-]+$/.test(filePrefix)) {
+    throw new Error(
+      "--file-prefix может содержать только буквы, цифры, точку, _ и -",
+    );
+  }
+  if (!['0', '1'].includes(values["include-existing"])) {
+    throw new Error("--include-existing должен быть 0 или 1");
+  }
+  const feedOptions = [];
+  if (onlyIds) feedOptions.push("--only-ids", onlyIds);
+  if (values["include-existing"] === "1") {
+    feedOptions.push("--include-existing");
+  }
 
   if (!["0", "1"].includes(values["wait-current"])) {
     throw new Error("--wait-current должен быть 0 или 1");
@@ -347,16 +405,20 @@ async function main() {
     await waitForAllCurrentImports({
       pollSeconds,
       timeoutHours,
+      stallMinutes,
     });
   }
 
-  const fullFeedPath = path.join(dataDir, "vk_market_products.yml");
+  const fullFeedName = `${filePrefix}_products.yml`;
+  const fullReportName = `${filePrefix}_validation.csv`;
+  const fullFeedPath = path.join(dataDir, fullFeedName);
   const fullArgs = [
     "/app/vk_market_feed.py",
     "--output",
-    "vk_market_products.yml",
+    fullFeedName,
     "--report",
-    "vk_market_validation.csv",
+    fullReportName,
+    ...feedOptions,
   ];
   if (totalLimit) fullArgs.push("--limit", String(totalLimit));
   run("python3", fullArgs);
@@ -374,9 +436,10 @@ async function main() {
     const currentSize = Math.min(batchSize, total - offset);
     const batchNumber = Math.floor(offset / batchSize) + 1;
     const totalBatches = Math.ceil(total / batchSize);
-    const fileName = `vk_market_batch_${String(offset).padStart(5, "0")}.yml`;
+    const fileName =
+      `${filePrefix}_batch_${String(offset).padStart(5, "0")}.yml`;
     const reportName =
-      `vk_market_batch_${String(offset).padStart(5, "0")}.csv`;
+      `${filePrefix}_batch_${String(offset).padStart(5, "0")}.csv`;
     console.log(
       `\n[Партия ${batchNumber}/${totalBatches}] ` +
         `${currentSize} товаров, смещение ${offset}`,
@@ -391,6 +454,7 @@ async function main() {
       fileName,
       "--report",
       reportName,
+      ...feedOptions,
     ]);
 
     let completed = false;
@@ -437,6 +501,7 @@ async function main() {
         expectedTotal: currentSize,
         pollSeconds,
         timeoutHours,
+        stallMinutes,
       });
       updateState({
         status: result.status,

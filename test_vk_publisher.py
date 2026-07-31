@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vk_market_feed import normalize_price, prepare_items, vk_picture_url
+from vk_market_feed import (
+    filter_products_by_ids,
+    normalize_price,
+    prepare_items,
+    vk_picture_url,
+)
 from vk_publisher import (
     Product,
     clean_text,
@@ -100,6 +105,27 @@ class MarketFeedTests(unittest.TestCase):
             vk_picture_url(source),
             "https://ir.ozone.ru/s3/multimedia-l/6020247177.jpg",
         )
+
+    def test_products_can_be_filtered_for_error_retry(self):
+        products = [
+            Product(
+                row_number=index + 2,
+                article=str(index),
+                description="Описание",
+                title=f"Товар {index}",
+                brand="",
+                size="",
+                image_urls=("https://example.test/1.jpg",),
+                source_url="",
+                price="100",
+            )
+            for index in range(3)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ids.txt"
+            path.write_text("2\n0\n", encoding="utf-8")
+            filtered = filter_products_by_ids(products, path)
+        self.assertEqual([product.article for product in filtered], ["0", "2"])
 
 
 class StateTests(unittest.TestCase):

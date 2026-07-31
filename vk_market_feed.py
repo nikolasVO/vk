@@ -108,6 +108,37 @@ def prepare_items(
     return items[offset:end], skipped
 
 
+def filter_products_by_ids(
+    products: list[Product], path: Path
+) -> list[Product]:
+    """Оставляет товары, ID которых перечислены по одному на строку."""
+    requested = {
+        line.strip()
+        for line in path.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if not requested:
+        raise SystemExit(f"Файл ID пуст: {path}")
+    filtered = [
+        product
+        for product in products
+        if (product.article or f"row-{product.row_number}") in requested
+    ]
+    found = {
+        product.article or f"row-{product.row_number}"
+        for product in filtered
+    }
+    missing = requested - found
+    if missing:
+        print(
+            f"Предупреждение: {len(missing)} ID из {path.name} "
+            "не найдены в Excel"
+        )
+    if not filtered:
+        raise SystemExit("Ни один ID для повторного импорта не найден в Excel")
+    return filtered
+
+
 def exclude_existing_products(
     products: list[Product], path: Path
 ) -> tuple[list[Product], list[tuple[Product, str]]]:
@@ -266,6 +297,8 @@ def main() -> int:
     parser.add_argument("--output", default="vk_market_products.yml")
     parser.add_argument("--report", default="vk_market_validation.csv")
     parser.add_argument("--existing", default="vk_market_existing.json")
+    parser.add_argument("--only-ids", default="")
+    parser.add_argument("--include-existing", action="store_true")
     parser.add_argument("--start-row", type=int, default=2)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--offset", type=int, default=0)
@@ -302,9 +335,17 @@ def main() -> int:
         existing_path = data_dir / existing_path
 
     products = load_products(xlsx_path, args.start_row)
-    products, existing_skipped = exclude_existing_products(
-        products, existing_path
-    )
+    if args.only_ids:
+        only_ids_path = Path(args.only_ids).expanduser()
+        if not only_ids_path.is_absolute():
+            only_ids_path = data_dir / only_ids_path
+        products = filter_products_by_ids(products, only_ids_path)
+    if args.include_existing:
+        existing_skipped: list[tuple[Product, str]] = []
+    else:
+        products, existing_skipped = exclude_existing_products(
+            products, existing_path
+        )
     items, invalid_skipped = prepare_items(
         products, args.limit, offset=args.offset
     )

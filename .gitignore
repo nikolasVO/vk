@@ -21,6 +21,7 @@ vk_market_*.csv
 vk_market_*.json
 vk_market_*.jsonl
 vk_market_*.png
+vk_market_*.txt
 vk_market_errors_*
 vk_market_template.xlsx
 vk_post_*_delete_failed.png
