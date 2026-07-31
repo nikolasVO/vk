@@ -11,6 +11,10 @@ const dataDir = path.resolve(process.env.VK_DATA_DIR || projectDir);
 const cdpUrl =
   process.env.BROWSER_CDP_URL?.trim() || "http://127.0.0.1:9222";
 const statePath = path.join(dataDir, "vk_market_import_state.json");
+const skippedPath = path.join(
+  dataDir,
+  "vk_market_skipped_batches.jsonl",
+);
 
 function positiveInteger(value, name, { allowZero = false } = {}) {
   const number = Number.parseInt(value, 10);
@@ -46,6 +50,32 @@ function updateState(values) {
     encoding: "utf8",
     mode: 0o600,
   });
+}
+
+function recordSkippedBatch({
+  file,
+  report,
+  offset,
+  size,
+  attempts,
+  reason,
+  result = null,
+}) {
+  const record = {
+    skipped_at: new Date().toISOString(),
+    file,
+    report,
+    offset,
+    size,
+    attempts,
+    reason,
+    result,
+  };
+  fs.appendFileSync(skippedPath, `${JSON.stringify(record)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  console.error(`Партия записана для разбора: ${skippedPath}`);
 }
 
 function countOffers(filePath) {
@@ -345,6 +375,8 @@ async function main() {
     const batchNumber = Math.floor(offset / batchSize) + 1;
     const totalBatches = Math.ceil(total / batchSize);
     const fileName = `vk_market_batch_${String(offset).padStart(5, "0")}.yml`;
+    const reportName =
+      `vk_market_batch_${String(offset).padStart(5, "0")}.csv`;
     console.log(
       `\n[Партия ${batchNumber}/${totalBatches}] ` +
         `${currentSize} товаров, смещение ${offset}`,
@@ -358,12 +390,11 @@ async function main() {
       "--output",
       fileName,
       "--report",
-      `vk_market_batch_${String(offset).padStart(5, "0")}.csv`,
+      reportName,
     ]);
 
     let completed = false;
     let attempt = 0;
-    let partialAttempts = 0;
     let failureStreak = 0;
     while (!completed) {
       attempt += 1;
@@ -380,6 +411,18 @@ async function main() {
         run("node", importArgs);
       } catch (error) {
         failureStreak += 1;
+        if (failureStreak >= retries) {
+          recordSkippedBatch({
+            file: fileName,
+            report: reportName,
+            offset,
+            size: currentSize,
+            attempts: attempt,
+            reason: `не удалось открыть импорт: ${error.message}`,
+          });
+          completed = true;
+          break;
+        }
         const delay = Math.min(30 * 2 ** (failureStreak - 1), 300);
         console.error(
           `Не удалось открыть импорт: ${error.message}. ` +
@@ -405,25 +448,37 @@ async function main() {
         break;
       }
       if (result.status === "partial") {
-        failureStreak = 0;
-        partialAttempts += 1;
         console.error(
           `VK отклонил ${result.failed} из ${result.total}. ` +
-            "Повторная отправка не дублирует уже добавленные товары.",
+            "Проблемные товары оставлены для последующего разбора.",
         );
-        if (partialAttempts >= retries) {
-          console.error(
-            "Лимит повторов исчерпан; проблемные товары будут найдены " +
-              "при следующем сканировании магазина.",
-          );
-          completed = true;
-          break;
-        }
-        await sleep(30000);
-        continue;
+        recordSkippedBatch({
+          file: fileName,
+          report: reportName,
+          offset,
+          size: currentSize,
+          attempts: attempt,
+          reason: `VK отклонил ${result.failed} из ${result.total}`,
+          result,
+        });
+        completed = true;
+        break;
       }
       console.error(`Партия не принята: ${result.message}`);
       failureStreak += 1;
+      if (failureStreak >= retries) {
+        recordSkippedBatch({
+          file: fileName,
+          report: reportName,
+          offset,
+          size: currentSize,
+          attempts: attempt,
+          reason: result.message,
+          result,
+        });
+        completed = true;
+        break;
+      }
       const delay = Math.min(30 * 2 ** (failureStreak - 1), 300);
       console.error(
         `Временная ошибка VK. Повтор этой же партии через ${delay} сек.`,
