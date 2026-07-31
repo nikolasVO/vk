@@ -33,9 +33,11 @@ function run(command, args) {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error(
+    const error = new Error(
       `Команда завершилась с кодом ${result.status}: ${command} ${args.join(" ")}`,
     );
+    error.exitStatus = result.status;
+    throw error;
   }
 }
 
@@ -354,6 +356,7 @@ async function main() {
       "only-ids": { type: "string", default: "" },
       "include-existing": { type: "string", default: "0" },
       "file-prefix": { type: "string", default: "vk_market" },
+      "interface-retry-seconds": { type: "string", default: "300" },
     },
   });
   const batchSize = positiveInteger(values["batch-size"], "--batch-size");
@@ -380,6 +383,10 @@ async function main() {
     "--stall-minutes",
   );
   const retries = positiveInteger(values.retries, "--retries");
+  const interfaceRetrySeconds = positiveInteger(
+    values["interface-retry-seconds"],
+    "--interface-retry-seconds",
+  );
   const onlyIds = values["only-ids"].trim();
   const filePrefix = values["file-prefix"].trim();
 
@@ -432,6 +439,8 @@ async function main() {
     `Фоновая очередь: ${total - startOffset} товаров, ` +
       `партии по ${batchSize}, начальное смещение ${startOffset}.`,
   );
+  let deferredBatches = 0;
+  let deferredOffers = 0;
   for (let offset = startOffset; offset < total; offset += batchSize) {
     const currentSize = Math.min(batchSize, total - offset);
     const batchNumber = Math.floor(offset / batchSize) + 1;
@@ -474,26 +483,28 @@ async function main() {
       try {
         run("node", importArgs);
       } catch (error) {
-        failureStreak += 1;
-        if (failureStreak >= retries) {
-          recordSkippedBatch({
-            file: fileName,
-            report: reportName,
-            offset,
-            size: currentSize,
-            attempts: attempt,
-            reason: `не удалось открыть импорт: ${error.message}`,
-          });
-          completed = true;
-          break;
+        if (error.exitStatus === 75) {
+          attempt -= 1;
+          console.error(
+            "Интерфейс импорта VK временно недоступен. " +
+              `Товары не пропущены; новая проверка через ` +
+              `${interfaceRetrySeconds} сек.`,
+          );
+          await sleep(interfaceRetrySeconds * 1000);
+          continue;
         }
-        const delay = Math.min(30 * 2 ** (failureStreak - 1), 300);
-        console.error(
-          `Не удалось открыть импорт: ${error.message}. ` +
-            `Новая попытка через ${delay} сек.`,
-        );
-        await sleep(delay * 1000);
-        continue;
+        recordSkippedBatch({
+          file: fileName,
+          report: reportName,
+          offset,
+          size: currentSize,
+          attempts: attempt,
+          reason: `не удалось отправить файл в интерфейс VK: ${error.message}`,
+        });
+        deferredBatches += 1;
+        deferredOffers += currentSize;
+        completed = true;
+        break;
       }
       const state = readState();
       const result = await waitForImport({
@@ -526,6 +537,8 @@ async function main() {
           reason: `VK отклонил ${result.failed} из ${result.total}`,
           result,
         });
+        deferredBatches += 1;
+        deferredOffers += currentSize;
         completed = true;
         break;
       }
@@ -541,6 +554,8 @@ async function main() {
           reason: result.message,
           result,
         });
+        deferredBatches += 1;
+        deferredOffers += currentSize;
         completed = true;
         break;
       }
@@ -551,7 +566,16 @@ async function main() {
       await sleep(delay * 1000);
     }
   }
-  console.log(`Готово: все ${total - startOffset} товаров отправлены партиями.`);
+  const attempted = total - startOffset;
+  if (deferredBatches) {
+    console.log(
+      `Очередь завершена: обработано ${attempted - deferredOffers}, ` +
+        `отложено для повтора ${deferredOffers} товаров ` +
+        `в ${deferredBatches} партиях.`,
+    );
+  } else {
+    console.log(`Готово: все ${attempted} товаров обработаны партиями.`);
+  }
 }
 
 main().catch((error) => {

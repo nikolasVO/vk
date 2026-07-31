@@ -147,64 +147,58 @@ async function dumpPage(page, label) {
 }
 
 async function openImportDialog(page, groupId) {
-  await page.goto(`https://vk.ru/club${groupId}?act=market_group_items`, {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
-  await page.waitForTimeout(4000);
-  if (/login|auth/i.test(page.url())) {
-    throw new Error("Docker Chromium не авторизован в VK");
-  }
-
-  let addProduct = await waitForVisibleControl(
-    page,
-    "Добавить товар",
-    {},
-    15000,
-  );
-  if (!addProduct) {
-    await page.goto(`https://vk.ru/club${groupId}`, {
+  const productsUrl =
+    `https://vk.ru/club${groupId}?act=market_group_items`;
+  let addProduct = null;
+  let accessDenied = false;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await page.goto(productsUrl, {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
-    await page.waitForTimeout(3000);
-    let businessTools = await findVisibleControl(page, "Бизнес-инструменты");
-    if (!businessTools) {
-      const more = await waitForVisibleControl(
-        page,
-        "Ещё",
-        { exact: true },
-        20000,
-      );
-      if (!more) {
-        await dumpPage(page, "group_controls");
-        throw new Error("В группе не найдена кнопка «Ещё»");
-      }
-      await more.click();
-      await page.waitForTimeout(1000);
-      businessTools = await waitForVisibleControl(
-        page,
-        "Бизнес-инструменты",
-        {},
-        10000,
-      );
-    }
-    if (!businessTools) {
-      await dumpPage(page, "more_menu");
-      throw new Error("В меню не найден раздел «Бизнес-инструменты»");
-    }
-    await businessTools.click();
     await page.waitForTimeout(4000);
+    if (/login|auth/i.test(page.url())) {
+      throw new Error("Docker Chromium не авторизован в VK");
+    }
+    const bodyText = await page.locator("body").innerText().catch(() => "");
+    accessDenied = /Ошибка доступа|Access denied/i.test(bodyText);
+    if (accessDenied) {
+      console.error(
+        `VK временно закрыл раздел импорта, попытка ${attempt}/3`,
+      );
+      if (attempt < 3) await page.waitForTimeout(attempt * 5000);
+      continue;
+    }
     addProduct = await waitForVisibleControl(
       page,
       "Добавить товар",
       {},
-      20000,
+      15000,
     );
+    if (addProduct) break;
+    console.error(
+      `VK не открыл раздел товаров, попытка ${attempt}/3: ${page.url()}`,
+    );
+    if (attempt < 3) {
+      await page.waitForTimeout(attempt * 5000);
+    }
   }
   if (!addProduct) {
-    await dumpPage(page, "business_tools");
-    throw new Error("Не найдена кнопка «Добавить товар»");
+    if (accessDenied) {
+      const screenshotPath = path.join(
+        dataDir,
+        "vk_market_access_denied.png",
+      );
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+      console.error(`Снимок Access denied: ${screenshotPath}`);
+    } else {
+      await dumpPage(page, "market_page_unavailable");
+    }
+    throw new Error(
+      accessDenied
+        ? "VK вернул Access denied для административного раздела товаров"
+        : "VK не открыл прямой раздел товаров после трёх попыток",
+    );
   }
   await addProduct.click();
   await page.waitForTimeout(1000);
@@ -247,7 +241,12 @@ async function main() {
   const page = await context.newPage();
   let keepPageOpen = false;
   try {
-    await openImportDialog(page, readGroupId());
+    try {
+      await openImportDialog(page, readGroupId());
+    } catch (error) {
+      error.exitCode = 75;
+      throw error;
+    }
     if (values.inspect) {
       await dumpPage(page, "import_dialog");
       return;
@@ -387,5 +386,5 @@ async function main() {
 
 main().catch((error) => {
   console.error(`ОШИБКА: ${error.stack || error.message}`);
-  process.exitCode = 1;
+  process.exitCode = error.exitCode || 1;
 });

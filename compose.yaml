@@ -102,6 +102,8 @@ services:
       - "${VK_MARKET_INCLUDE_EXISTING:-0}"
       - --file-prefix
       - "${VK_MARKET_FILE_PREFIX:-vk_market}"
+      - --interface-retry-seconds
+      - "${VK_MARKET_INTERFACE_RETRY_SECONDS:-300}"
     restart: "no"
     profiles:
       - market
